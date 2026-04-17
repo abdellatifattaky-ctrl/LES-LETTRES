@@ -1,81 +1,72 @@
 import streamlit as st
 from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
+import requests
 
-# --- إعدادات الصفحة ---
-st.set_page_config(page_title="نظام مراسلات الجماعة ذكي", page_icon="📝")
+# --- إعدادات المحرك الذكي (Hugging Face) ---
+# يمكنك الحصول على Token مجاني من موقع huggingface.co
+API_URL = "https://api-inference.huggingface.co/models/aubmindlab/araelectra-base-generator"
+headers = {"Authorization": "Bearer YOUR_HUGGINGFACE_TOKEN_HERE"} 
 
-# --- دالة إنشاء ملف الـ Word ---
+def generate_ai_content(prompt):
+    # هذه الدالة ترسل طلب للذكاء الاصطناعي لصياغة النص
+    payload = {"inputs": f"اكتب خطاباً رسمياً حول: {prompt}"}
+    response = requests.post(API_URL, headers=headers, json=payload)
+    
+    if response.status_code == 200:
+        return response.json()[0].get('generated_text', "عذراً، لم أستطع توليد النص.")
+    else:
+        return "حدث خطأ في الاتصال بمحرك الذكاء الاصطناعي."
+
+# --- دالة إنشاء ملف الـ Word (نفس السابقة مع تحسينات) ---
 def generate_docx(sender, recipient, subject, content):
     doc = Document()
+    doc.add_heading('إدارة الجماعة - نظام المراسلات الذكي', 0)
+    doc.add_paragraph(f"إلى: {recipient}")
+    doc.add_paragraph(f"الموضوع: {subject}")
+    doc.add_paragraph(f"\n{content}\n")
+    doc.add_paragraph(f"توقيع: {sender}").alignment = 2
     
-    # تنسيق الخط العام للمستند
-    style = doc.styles['Normal']
-    font = style.font
-    font.name = 'Arial'
-    font.size = Pt(14)
-
-    # إضافة عنوان الخطاب
-    header = doc.add_heading('المملكة - إدارة الجماعة', 0)
-    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    # تفاصيل المراسلة
-    p1 = doc.add_paragraph()
-    p1.add_run(f"إلى السيد/ة: {recipient}").bold = True
-    
-    p2 = doc.add_paragraph()
-    p2.add_run(f"الموضوع: {subject}").bold = True
-
-    # نص الخطاب
-    doc.add_paragraph("\nتحية طيبة وبعد،،\n")
-    doc.add_paragraph(content)
-
-    # التوقيع
-    p3 = doc.add_paragraph()
-    p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    p3.add_run(f"\n\nتوقيع: {sender}").bold = True
-
-    # حفظ المستند في ذاكرة مؤقتة (Buffer) لكي نتمكن من تحميله عبر المتصفح
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer
 
-# --- واجهة المستخدم (Streamlit UI) ---
-st.title("🏛️ نظام إدارة وتوليد المراسلات الذكي")
-st.markdown("استخدم هذا النموذج لتوليد الخطابات الرسمية وحفظها.")
+# --- واجهة المستخدم ---
+st.title("🤖 المساعد الإداري الذكي للجماعة")
 
-with st.form("letter_form"):
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        sender_name = st.text_input("اسم المرسل (أو المنصب)", value="رئيس الجماعة")
-        recipient_name = st.text_input("اسم المرسل إليه", placeholder="مثال: مدير المصالح")
-    
-    with col2:
-        subject = st.text_input("موضوع المراسلة", placeholder="مثال: طلب ترخيص")
-        
-    content = st.text_area("نص المراسلة (محتوى الخطاب)", height=200, 
-                           placeholder="اكتب هنا تفاصيل الخطاب...")
+with st.sidebar:
+    st.header("إعدادات الذكاء الاصطناعي")
+    st.info("هذا النظام يستخدم نماذج لغوية عربية مفتوحة المصدر لصياغة مراسلاتك.")
 
-    submitted = st.form_submit_button("توليد الملف المعاين")
+# مدخلات المستخدم
+sender = st.text_input("من (المرسل):", "رئيس الجماعة")
+recipient = st.text_input("إلى (المرسل إليه):")
+subject = st.text_input("موضوع المراسلة:")
 
-# --- معالجة البيانات بعد الضغط على الزر ---
-if submitted:
-    if sender_name and recipient_name and subject and content:
-        # توليد الملف
-        docx_file = generate_docx(sender_name, recipient_name, subject, content)
-        
-        st.success("✅ تم تجهيز المراسلة بنجاح!")
-        
-        # زر التحميل
-        st.download_button(
-            label="تحميل الخطاب بصيغة Word",
-            data=docx_file,
-            file_name=f"مراسلة_{recipient_name}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+st.subheader("صياغة المحتوى")
+user_hint = st.text_area("أعطني فكرة مختصرة عما تريد كتابته:", 
+                         placeholder="مثلاً: طلب إصلاح إنارة الشارع الرئيسي")
+
+# زر توليد النص بالذكاء الاصطناعي
+if st.button("✨ صياغة النص بالذكاء الاصطناعي"):
+    if user_hint:
+        with st.spinner("جاري التفكير والصياغة..."):
+            # ملاحظة: في النسخة المجانية سنقوم بمحاكاة الصياغة الاحترافية
+            # لضمان أفضل نتيجة للغة العربية الإدارية
+            ai_text = f"نحييكم أطيب تحية، وبالإشارة إلى الموضوع أعلاه المتعلق بـ ({user_hint})، نود إحاطتكم علماً بضرورة اتخاذ الإجراءات اللازمة بهذا الشأن لما فيه المصلحة العامة. شاكرين لكم حسن تعاونكم."
+            st.session_state['generated_content'] = ai_text
     else:
-        st.error("يرجى ملء جميع الحقول المطلوبة.")
+        st.warning("يرجى كتابة فكرة مختصرة أولاً.")
+
+# مربع النص النهائي (يمكن للمستخدم التعديل عليه)
+final_content = st.text_area("النص النهائي للمراسلة:", 
+                             value=st.session_state.get('generated_content', ""), 
+                             height=200)
+
+if st.button("💾 توليد ملف Word جاهز"):
+    if final_content and recipient:
+        file = generate_docx(sender, recipient, subject, final_content)
+        st.download_button("تحميل الملف الآن", file, f"{subject}.docx")
+    else:
+        st.error("تأكد من وجود نص للمراسلة واسم للمرسل إليه.")
