@@ -1,5 +1,6 @@
 import streamlit as st
-import google.generativeai as genai
+import requests
+import json
 import io
 import sqlite3
 import pandas as pd
@@ -7,135 +8,105 @@ from datetime import datetime
 from docx import Document
 
 # --- إعدادات الصفحة ---
-st.set_page_config(page_title="نظام الإدارة الذكي للجماعة", layout="wide", page_icon="🏛️")
+st.set_page_config(page_title="نظام الإدارة الذكي للجماعة", layout="wide")
 
-# --- حل مشكلة الـ 404 (إعداد الذكاء الاصطناعي) ---
-MY_API_KEY = "AQ.Ab8RN6LtDoih_ytIju3ulJTIa18hvJdnOpfnAUpn3KMJVDNb1w"
-genai.configure(api_key=MY_API_KEY)
+# --- إعدادات الاتصال المباشر بـ Gemini ---
+API_KEY = "AQ.Ab8RN6LtDoih_ytIju3ulJTIa18hvJdnOpfnAUpn3KMJVDNb1w"
+# استخدام الرابط المباشر للإصدار المستقر v1
+API_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={API_KEY}"
 
-# استخدام تسمية الموديل المباشرة (هذا يحل مشكلة الـ 404 في أغلب المناطق)
-MODEL_NAME = 'gemini-1.5-flash'
+def call_gemini_api(prompt):
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+    try:
+        response = requests.post(API_URL, headers=headers, data=json.dumps(data))
+        response_json = response.json()
+        
+        if response.status_code == 200:
+            # استخراج النص من الاستجابة الرسمية
+            return response_json['candidates'][0]['content']['parts'][0]['text']
+        else:
+            return f"خطأ من Google: {response_json.get('error', {}).get('message', 'خطأ غير معروف')}"
+    except Exception as e:
+        return f"فشل الاتصال بالخادم: {str(e)}"
 
 # --- وظائف قاعدة البيانات ---
 def init_db():
-    conn = sqlite3.connect('commune_system.db')
+    conn = sqlite3.connect('commune_safe_system.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS letters 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  letter_number TEXT,
-                  date TEXT, sender TEXT, recipient TEXT, 
-                  subject TEXT, content TEXT)''')
+                  letter_number TEXT, date TEXT, sender TEXT, 
+                  recipient TEXT, subject TEXT, content TEXT)''')
     conn.commit()
     conn.close()
 
-def save_to_archive(letter_num, sender, recipient, subject, content):
-    conn = sqlite3.connect('commune_system.db')
+def get_next_letter_num():
+    conn = sqlite3.connect('commune_safe_system.db')
     c = conn.cursor()
-    c.execute("INSERT INTO letters (letter_number, date, sender, recipient, subject, content) VALUES (?, ?, ?, ?, ?, ?)",
-              (letter_num, datetime.now().strftime("%Y-%m-%d %H:%M"), sender, recipient, subject, content))
-    conn.commit()
+    c.execute("SELECT COUNT(*) FROM letters")
+    count = c.fetchone()[0]
     conn.close()
-
-def get_next_id():
-    try:
-        conn = sqlite3.connect('commune_system.db')
-        c = conn.cursor()
-        c.execute("SELECT MAX(id) FROM letters")
-        result = c.fetchone()[0]
-        conn.close()
-        return (result + 1) if result else 1
-    except:
-        return 1
+    return f"GEM-{datetime.now().year}/{count + 1:03d}"
 
 # --- واجهة المستخدم ---
 init_db()
-st.title("🏛️ نظام صياغة وأرشفة المراسلات الذكي")
-st.markdown("---")
+st.title("🏛️ نظام المراسلات الإداري (النسخة المستقرة)")
 
-tab1, tab2 = st.tabs(["📝 إنشاء مراسلة جديدة", "🗄️ الأرشيف والبحث"])
+tab1, tab2 = st.tabs(["📝 إنشاء مراسلة", "🗄️ الأرشيف"])
 
 with tab1:
-    # توليد رقم مراسلة تلقائي (جماعة/السنة/الرقم)
-    next_id = get_next_id()
-    current_year = datetime.now().year
-    auto_letter_num = f"GEM-{current_year}/{next_id:03d}"
-
     col1, col2 = st.columns(2)
     with col1:
-        letter_number = st.text_input("🔢 رقم المراسلة", value=auto_letter_num)
-        sender = st.text_input("✍️ من (الجهة المرسلة)", "رئيس الجماعة")
+        l_num = st.text_input("رقم المراسلة", value=get_next_letter_num())
+        sender = st.text_input("المرسل", "رئيس الجماعة")
     with col2:
-        recipient = st.text_input("📩 إلى (الجهة المستقبلة)")
-        subject = st.text_input("📌 الموضوع")
+        recipient = st.text_input("المرسل إليه")
+        subject = st.text_input("الموضوع")
 
-    user_hint = st.text_area("📝 محتوى مختصر (الذكاء الاصطناعي سيتولى التفاصيل):")
+    hint = st.text_area("وصف المراسلة:")
 
-    if st.button("✨ صياغة المراسلة الآن"):
-        if user_hint:
-            with st.spinner("جاري الاتصال بالمحرك وصياغة الخطاب..."):
-                try:
-                    # المحاولة باستخدام الموديل المحدد
-                    model = genai.GenerativeModel(MODEL_NAME)
-                    prompt = f"""
-                    اكتب خطاباً رسمياً إدارياً مغربياً رصيناً باللغة العربية.
-                    رقم المراسلة: {letter_number}
-                    من: {sender}
-                    إلى: {recipient}
-                    الموضوع: {subject}
-                    المحتوى الأساسي: {user_hint}
-                    تأكد من كتابة التحية الافتتاحية والخاتمة الرسمية.
-                    """
-                    response = model.generate_content(prompt)
-                    st.session_state['draft_content'] = response.text
-                except Exception as e:
-                    # محاولة أخيرة في حال فشل الموديل المحدد (استخدام الموديل الأساسي)
-                    try:
-                        model_alt = genai.GenerativeModel('gemini-pro')
-                        response = model_alt.generate_content(user_hint)
-                        st.session_state['draft_content'] = response.text
-                    except:
-                        st.error(f"خطأ في الوصول للموديل: {str(e)}")
+    if st.button("✨ صياغة بالذكاء الاصطناعي"):
+        if hint:
+            with st.spinner("جاري التوليد عبر الرابط المستقر..."):
+                full_prompt = f"اكتب خطاباً رسمياً إدارياً باللغة العربية. الرقم: {l_num}. من: {sender}. إلى: {recipient}. الموضوع: {subject}. المحتوى: {hint}."
+                result = call_gemini_api(full_prompt)
+                st.session_state['result_text'] = result
         else:
-            st.warning("يرجى إدخال تفاصيل المراسلة.")
+            st.error("يرجى إدخال الوصف.")
 
-    if 'draft_content' in st.session_state:
-        final_content = st.text_area("📄 النص المولد (يمكنك التعديل):", 
-                                    value=st.session_state['draft_content'], height=400)
+    if 'result_text' in st.session_state:
+        final_text = st.text_area("النص المولد:", value=st.session_state['result_text'], height=300)
         
-        if st.button("💾 حفظ في الأرشيف وتنزيل الملف"):
-            save_to_archive(letter_number, sender, recipient, subject, final_content)
+        if st.button("💾 حفظ وتنزيل"):
+            # حفظ في الأرشيف
+            conn = sqlite3.connect('commune_safe_system.db')
+            c = conn.cursor()
+            c.execute("INSERT INTO letters (letter_number, date, sender, recipient, subject, content) VALUES (?,?,?,?,?,?)",
+                      (l_num, datetime.now().strftime("%Y-%m-%d"), sender, recipient, subject, final_text))
+            conn.commit()
+            conn.close()
             
-            # إنشاء ملف Word
+            # تصدير Word
             doc = Document()
-            doc.add_heading(f"مراسلة رقم: {letter_number}", 1)
-            doc.add_paragraph(f"التاريخ: {datetime.now().strftime('%Y-%m-%d')}")
-            doc.add_paragraph(f"الموضوع: {subject}")
-            doc.add_paragraph("-" * 30)
-            doc.add_paragraph(final_content)
-            doc.add_paragraph(f"\nتوقيع: {sender}").alignment = 2
-
-            buffer = io.BytesIO()
-            doc.save(buffer)
-            buffer.seek(0)
+            doc.add_heading(f"مراسلة رقم: {l_num}", 1)
+            doc.add_paragraph(final_text)
+            buf = io.BytesIO()
+            doc.save(buf)
+            buf.seek(0)
             
-            st.success(f"تم الحفظ بنجاح تحت رقم: {letter_number}")
-            st.download_button("⬇️ تحميل ملف Word", buffer, f"letter_{letter_number}.docx")
+            st.success("تم الحفظ!")
+            st.download_button("تحميل الملف", buf, f"letter_{l_num}.docx")
 
 with tab2:
-    st.subheader("🗄️ سجل الأرشيف")
-    conn = sqlite3.connect('commune_system.db')
+    conn = sqlite3.connect('commune_safe_system.db')
     df = pd.read_sql_query("SELECT * FROM letters ORDER BY id DESC", conn)
     conn.close()
-
     if not df.empty:
-        st.dataframe(df[['letter_number', 'date', 'recipient', 'subject']], use_container_width=True)
-        search_id = st.text_input("أدخل رقم المراسلة لعرض محتواها:")
-        if st.button("عرض المحتوى الكامل"):
-            res = df[df['letter_number'] == search_id]
-            if not res.empty:
-                st.write("---")
-                st.info(res.iloc[0]['content'])
-            else:
-                st.error("الرقم غير موجود.")
+        st.dataframe(df[['letter_number', 'date', 'recipient', 'subject']])
     else:
         st.write("الأرشيف فارغ.")
