@@ -8,166 +8,135 @@ from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# --- إعدادات الصفحة ---
-st.set_page_config(page_title="نظام المراسلات - جماعة أسكاون", layout="wide")
+# --- 1. إعدادات الصفحة ---
+st.set_page_config(page_title="نظام جماعة أسكاون الذكي", layout="wide")
 
-# --- إعداد الذكاء الاصطناعي ---
+# --- 2. إعداد الذكاء الاصطناعي ---
+# استخدم مفتاح الـ API الخاص بك
 MY_API_KEY = "AQ.Ab8RN6LtDoih_ytIju3ulJTIa18hvJdnOpfnAUpn3KMJVDNb1w"
 genai.configure(api_key=MY_API_KEY)
 
 @st.cache_resource
-def get_available_model():
+def get_model():
     try:
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 return m.name
-    except: return "models/gemini-1.5-flash"
+    except:
+        return "models/gemini-1.5-flash"
 
-active_model_name = get_available_model()
+active_model = get_model()
 
-# --- وظائف قاعدة البيانات ---
+# --- 3. وظائف قاعدة البيانات ---
 def init_db():
-    conn = sqlite3.connect('askaouen_admin.db')
+    conn = sqlite3.connect('askaouen_final.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS letters 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  letter_number TEXT, date TEXT, sender TEXT, 
-                  recipient TEXT, subject TEXT, content TEXT, attachments TEXT)''')
+                  letter_num TEXT, date TEXT, sender TEXT, 
+                  recipient TEXT, subject TEXT, content TEXT)''')
     conn.commit()
     conn.close()
 
 def get_next_num():
     try:
-        conn = sqlite3.connect('askaouen_admin.db')
+        conn = sqlite3.connect('askaouen_final.db')
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM letters")
         count = c.fetchone()[0]
         conn.close()
-        return f"{count + 7:02d}/{datetime.now().year}" # يبدأ من الرقم 07 حسب ملفك
-    except: return f"07/{datetime.now().year}"
+        # يبدأ من الرقم 7 كما في نموذجك 
+        return f"{count + 7:02d}/2026"
+    except:
+        return "07/2026"
 
-# --- دالة تنسيق ملف Word (نموذج جماعة أسكاون) ---
-def create_askaouen_word(l_num, date_str, sender, recipient, subject, content, attachments):
+# --- 4. دالة تنسيق ملف Word (المعايير المغربية) ---
+def create_doc(l_num, date_str, sender, recipient, subject, content):
     doc = Document()
     style = doc.styles['Normal']
     style.font.name = 'Arial'
     style.font.size = Pt(12)
 
-    # 1. الرأس الإداري (يمين ويسار) 
-    header_table = doc.add_table(rows=1, cols=2)
-    header_table.width = Inches(6)
+    # الرأس (يمين: الإدارة / يسار: التاريخ) [cite: 1, 3]
+    tbl = doc.add_table(rows=1, cols=2)
+    tbl.width = Inches(6)
     
-    right_cell = header_table.cell(0, 0)
-    p_right = right_cell.add_paragraph()
-    p_right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    # معلومات مأخوذة من ترويسة ملفك 
-    p_right.add_run("المملكة المغربية\nوزارة الداخلية\nإقليم تارودانت\nدائرة تالوين\nجماعة أسكاون").bold = True
+    r_cell = tbl.cell(0, 0)
+    p_r = r_cell.add_paragraph()
+    p_r.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p_r.add_run("المملكة المغربية\nوزارة الداخلية\nإقليم تارودانت\nدائرة تالوين\nجماعة أسكاون").bold = True
     
-    left_cell = header_table.cell(0, 1)
-    p_left = left_cell.add_paragraph()
-    p_left.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    p_left.add_run(f"أسكاون في: {date_str}") [cite: 14]
+    l_cell = tbl.cell(0, 1)
+    p_l = l_cell.add_paragraph()
+    p_l.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p_l.add_run(f"أسكاون في: {date_str}")
 
     doc.add_paragraph()
-
-    # 2. الرقم الترتيبي [cite: 13]
-    ref_p = doc.add_paragraph()
-    ref_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    ref_p.add_run(f"عدد: {l_num}").bold = True
-
-    doc.add_paragraph()
-
-    # 3. من ... إلى [cite: 15, 16, 17]
-    dest_p = doc.add_paragraph()
-    dest_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    dest_p.add_run(f"{sender}\nإلى\n{recipient}").bold = True
-
-    doc.add_paragraph()
-
-    # 4. الموضوع [cite: 18]
-    sub_p = doc.add_paragraph()
-    sub_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    sub_p.add_run(f"الموضوع: {subject}").bold = True
+    # رقم المراسلة 
+    doc.add_paragraph(f"عدد: {l_num}").alignment = WD_ALIGN_PARAGRAPH.RIGHT
     
-    # 5. المرفقات (إضافة جديدة)
-    if attachments:
-        att_p = doc.add_paragraph()
-        att_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        att_p.add_run(f"المرفقات: {attachments}")
-
-    doc.add_paragraph()
-
-    # 6. التحية الرسمية [cite: 19]
-    salutation = doc.add_paragraph()
-    salutation.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    salutation.add_run("سلام تام بوجود مولانا الإمام").bold = True
+    # من ... إلى [cite: 4, 5, 6]
+    doc.add_paragraph(f"\n{sender}\nإلى\n{recipient}").alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # 7. نص المراسلة 
-    body_p = doc.add_paragraph()
-    body_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    body_p.add_run("وبعد، " + content)
-    body_p.paragraph_format.line_spacing = 1.5
-
-    doc.add_paragraph()
-
-    # 8. الخاتمة والتوقيع [cite: 21, 22]
-    end_p = doc.add_paragraph()
-    end_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    end_p.add_run("وتقبلوا أسمى عبارات التقدير والاحترام").bold = True
+    # الموضوع [cite: 7]
+    doc.add_paragraph(f"\nالموضوع: {subject}").bold = True
     
-    sign_p = doc.add_paragraph()
-    sign_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    sign_p.add_run("\nرئيس المجلس الجماعي").bold = True
+    # التحية الرسمية [cite: 8]
+    p_salut = doc.add_paragraph("\nسلام تام بوجود مولانا الإمام،")
+    p_salut.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_salut.bold = True
+
+    # النص [cite: 9]
+    p_body = doc.add_paragraph(f"\nوبعد، {content}")
+    p_body.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    
+    # الخاتمة والتوقيع [cite: 10, 11]
+    doc.add_paragraph("\nوتقبلوا اسمى عبارات التقدير والاحترام.").alignment = WD_ALIGN_PARAGRAPH.LEFT
+    doc.add_paragraph("\nرئيس المجلس الجماعي").alignment = WD_ALIGN_PARAGRAPH.LEFT
 
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
     return buf
 
-# --- واجهة المستخدم Streamlit ---
+# --- 5. واجهة المستخدم ---
 init_db()
-st.title("🏛️ بوابة المراسلات الإدارية - جماعة أسكاون")
+st.title("🏛️ نظام مراسلات جماعة أسكاون")
 
-col1, col2 = st.columns([1, 1.5])
+tab1, tab2 = st.tabs(["📝 تحرير جديد", "🗄️ الأرشيف"])
 
-with col1:
-    st.subheader("🖋️ تحرير مراسلة")
-    l_num = st.text_input("رقم المراسلة", value=get_next_num())
-    date_val = st.text_input("التاريخ", value=datetime.now().strftime("%d %B %Y"))
-    sender = st.text_input("من", value="رئيس جماعة أسكاون") [cite: 15]
-    recipient = st.text_input("إلى", value="السيد القابض الجماعي بتالوين") [cite: 17]
-    subject = st.text_input("الموضوع", value="حضور جلسة فتح الاظرفة") [cite: 18]
-    attachments = st.text_input("المرفقات (إن وجدت)")
-    hint = st.text_area("عناصر المحتوى (مثال: أشغال تزويد الماء بدواوير...)") [cite: 20]
+with tab1:
+    c1, c2 = st.columns(2)
+    with c1:
+        num = st.text_input("رقم المراسلة", value=get_next_num())
+        dt = st.text_input("التاريخ", value="12 يناير 2026")
+        snd = st.text_input("من", value="رئيس جماعة أسكاون")
+    with c2:
+        rcp = st.text_input("إلى", value="السيد القابض الجماعي بتالوين")
+        sub = st.text_input("الموضوع", value="حضور جلسة فتح الاظرفة")
     
-    generate_btn = st.button("🚀 صياغة المراسلة")
-
-with col2:
-    st.subheader("📄 المعاينة")
-    if generate_btn:
-        with st.spinner("جاري التوليد..."):
-            model = genai.GenerativeModel(active_model_name)
-            prompt = f"صغ خطابا إداريا مغربيا لجماعة أسكاون. الموضوع: {subject}. العناصر: {hint}. استخدم عبارات: يشرفني دعوتكم، علاقة بالموضوع، يوم الاربعاء 21 يناير."
-            response = model.generate_content(prompt)
-            st.session_state['aska_text'] = response.text
-
-    if 'aska_text' in st.session_state:
-        final_text = st.text_area("النص المولد:", value=st.session_state['aska_text'], height=400)
-        
-        if st.button("💾 حفظ وتنزيل"):
-            conn = sqlite3.connect('askaouen_admin.db')
-            c = conn.cursor()
-            c.execute("INSERT INTO letters (letter_number, date, sender, recipient, subject, content, attachments) VALUES (?,?,?,?,?,?,?)",
-                      (l_num, date_val, sender, recipient, subject, final_text, attachments))
+    hint = st.text_area("أدخل تفاصيل الطلب (ليتم صياغتها ذكياً):")
+    
+    if st.button("🚀 توليد وصياغة"):
+        if hint:
+            model = genai.GenerativeModel(active_model)
+            p = f"اكتب خطاباً إدارياً مغربياً. الموضوع: {sub}. المحتوى: {hint}. استخدم أسلوب 'يشرفني دعوتكم'."
+            res = model.generate_content(p)
+            st.session_state['txt'] = res.text
+    
+    if 'txt' in st.session_state:
+        edited = st.text_area("النص المولد:", value=st.session_state['txt'], height=300)
+        if st.button("💾 حفظ وتحميل"):
+            conn = sqlite3.connect('askaouen_final.db')
+            conn.cursor().execute("INSERT INTO letters (letter_num, date, sender, recipient, subject, content) VALUES (?,?,?,?,?,?)",
+                                  (num, dt, snd, rcp, sub, edited))
             conn.commit()
             conn.close()
-            
-            word_file = create_askaouen_word(l_num, date_val, sender, recipient, subject, final_text, attachments)
-            st.download_button("تحميل المراسلة الرسمية (.docx)", word_file, f"askaouen_{l_num.replace('/', '-')}.docx")
+            file = create_doc(num, dt, snd, rcp, sub, edited)
+            st.download_button("تحميل الملف (.docx)", file, f"{num.replace('/', '-')}.docx")
 
-st.markdown("---")
-st.subheader("🗄️ أرشيف الجماعة")
-conn = sqlite3.connect('askaouen_admin.db')
-df = pd.read_sql_query("SELECT * FROM letters ORDER BY id DESC", conn)
-conn.close()
-st.dataframe(df, use_container_width=True)
+with tab2:
+    conn = sqlite3.connect('askaouen_final.db')
+    df = pd.read_sql_query("SELECT * FROM letters ORDER BY id DESC", conn)
+    conn.close()
+    st.dataframe(df, use_container_width=True)
